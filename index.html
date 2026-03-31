@@ -680,7 +680,7 @@ async function uploadPdf(id, input){
       body: JSON.stringify({ expiresIn: 315360000 })
     });
     const signData = await signRes.json();
-    const url = signData.signedURL ? SUPABASE_URL+signData.signedURL : SUPABASE_URL+'/storage/v1/object/public/floor-plans/'+path;
+    const url = signData.signedURL ? SUPABASE_URL+'/storage/v1'+signData.signedURL : SUPABASE_URL+'/storage/v1/object/public/floor-plans/'+path;
     await sbFetch('schedules?id=eq.'+id, 'PATCH', { floor_plan_url: url });
     const d = data.find(x=>x.id===id); if(d) d.floorPlanUrl = url;
     toast('✓ PDFをアップロードしました');
