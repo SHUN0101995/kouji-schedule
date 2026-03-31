@@ -459,8 +459,9 @@ function normalizeRow(r){
     end:      r.end||'',
     status:   r.status||'予定',
     source:   r.source||'dandori',
-    clientId: r.client_id||r.clientId||'',
-    memo:     r.memo||'',
+    clientId:     r.client_id||r.clientId||'',
+    memo:         r.memo||'',
+    floorPlanUrl: r.floor_plan_url||'',
   };
 }
 
@@ -473,8 +474,9 @@ function toSbRow(d){
     end:       d.end||null,
     status:    d.status,
     source:    d.source||'dandori',
-    client_id: d.clientId||null,
-    memo:      d.memo||'',
+    client_id:     d.clientId||null,
+    memo:          d.memo||'',
+    floor_plan_url: d.floorPlanUrl||null,
   };
 }
 
@@ -637,6 +639,20 @@ function openDet(id){
     <div class="det-row"><span class="det-icon">📅</span><span class="det-label">工期</span><span class="det-val">${e.start||'?'} 〜 ${e.end||'?'}</span></div>
     <div class="det-row"><span class="det-icon">🏷</span><span class="det-label">状態</span><span class="det-val"><span class="stb s${e.status}">${e.status}</span></span></div>
     ${e.memo?`<div class="det-memo">${e.memo}</div>`:''}
+    <div style="margin:14px 0 8px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">平面図PDF</div>
+      ${e.floorPlanUrl
+        ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <button class="bs" style="font-size:12px;padding:6px 12px" onclick="window.open('${e.floorPlanUrl}','_blank')">PDFを開く</button>
+            <button class="del-link" style="font-size:11px" onclick="deletePdf('${e.id}')">削除</button>
+          </div>`
+        : `<label style="display:inline-block;cursor:pointer">
+            <input type="file" accept="application/pdf" style="display:none" onchange="uploadPdf('${e.id}',this)">
+            <span class="bc" style="font-size:12px;padding:6px 12px;cursor:pointer">PDFをアップロード</span>
+          </label>
+          <div id="pdf-status-${e.id}" style="font-size:11px;color:var(--text3);margin-top:4px"></div>`
+      }
+    </div>
     <div class="ma">
       <button class="del-link" onclick="delEntry('${e.id}')">削除</button>
       <button class="bc" onclick="closeDet()">閉じる</button>
@@ -645,6 +661,44 @@ function openDet(id){
   document.getElementById('det-mo').classList.add('open');
 }
 function closeDet(){document.getElementById('det-mo').classList.remove('open');}
+async function uploadPdf(id, input){
+  const file = input.files[0]; if(!file) return;
+  const statusEl = document.getElementById('pdf-status-'+id);
+  if(statusEl) statusEl.textContent = 'アップロード中...';
+  try {
+    const path = id+'.pdf';
+    const res = await fetch(SUPABASE_URL+'/storage/v1/object/floor-plans/'+path, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer '+SUPABASE_KEY, 'Content-Type': 'application/pdf' },
+      body: file
+    });
+    if(!res.ok){ const t=await res.text(); throw new Error(t); }
+    const url = SUPABASE_URL+'/storage/v1/object/public/floor-plans/'+path;
+    await sbFetch('schedules?id=eq.'+id, 'PATCH', { floor_plan_url: url });
+    const d = data.find(x=>x.id===id); if(d) d.floorPlanUrl = url;
+    toast('✓ PDFをアップロードしました');
+    openDet(id);
+  } catch(e){
+    console.error(e);
+    if(statusEl) statusEl.textContent = 'エラー: '+e.message;
+  }
+}
+
+async function deletePdf(id){
+  if(!confirm('PDFを削除しますか？')) return;
+  try {
+    const path = id+'.pdf';
+    await fetch(SUPABASE_URL+'/storage/v1/object/floor-plans/'+path, {
+      method: 'DELETE',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer '+SUPABASE_KEY }
+    });
+    await sbFetch('schedules?id=eq.'+id, 'PATCH', { floor_plan_url: null });
+    const d = data.find(x=>x.id===id); if(d) d.floorPlanUrl = '';
+    toast('PDFを削除しました');
+    openDet(id);
+  } catch(e){ console.error(e); toast('削除に失敗しました'); }
+}
+
 
 function openMulti(ids){
   const items=ids.map(id=>data.find(d=>d.id===id)).filter(Boolean);
