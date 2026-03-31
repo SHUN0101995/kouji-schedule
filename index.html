@@ -379,27 +379,38 @@ const SUPABASE_KEY = 'sb_publishable_238SlBqR783TqcdWwBVo9w_gE9Z4VYv';
 const TABLE = 'schedules';
 
 // ════════════════════════════════════════════════════════
-// 元請け会社マスター（ローカル管理）
+// 元請け会社マスター（Supabase管理）
 // ════════════════════════════════════════════════════════
-const CLIENT_KEY = 'kouji_clients_v1';
 const CLIENT_COLORS = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#db2777','#65a30d','#0d9488','#475569'];
 let selColor = CLIENT_COLORS[0], editingCid = null;
-
-const defaultClients = [
-  { id:'cl1', name:'JTM商事', short:'JTM',     contact:'', tel:'', color:'#2563eb' },
-  { id:'cl2', name:'フレスコ',             short:'フレスコ', contact:'', tel:'', color:'#16a34a' },
-  { id:'cl3', name:'千原建設', short:'', contact:'', tel:'', color:'#d97706' },
-  { id:'cl4', name:'東京ハウス', short:'', contact:'', tel:'', color:'#dc2626' },
-  { id:'cl5', name:'オープンハウス', short:'', contact:'', tel:'', color:'#db2777' },
-  { id:'cl6', name:'岩澤', short:'', contact:'', tel:'', color:'#475569' },
-
-];
 let clients = [];
-try { const s=localStorage.getItem(CLIENT_KEY); clients=s?JSON.parse(s):defaultClients; } catch(e){ clients=defaultClients; }
-function saveClients(){ try{localStorage.setItem(CLIENT_KEY,JSON.stringify(clients));}catch(e){} }
+
 function getClient(id){ return clients.find(c=>c.id===id)||null; }
 function clientColor(id){ const c=getClient(id); return c?c.color:null; }
 function clientLabel(id){ const c=getClient(id); return c?(c.short||c.name):''; }
+
+async function loadClients(){
+  try {
+    const rows = await sbFetch('clients?order=created_at.asc');
+    clients = rows.map(r=>({
+      id: r.id, name: r.name||'', short: r.short||'',
+      color: r.color||CLIENT_COLORS[0], memo: r.memo||'',
+      contact:'', tel:''
+    }));
+    populateClientSelects();
+    updateBannerSub();
+  } catch(e){ console.error('clients load error', e); }
+}
+
+async function saveClients_sb(obj, isNew){
+  const row = { id: obj.id, name: obj.name, short: obj.short||'', color: obj.color, memo: obj.memo||'' };
+  if(isNew){
+    await sbFetch('clients', 'POST', row);
+  } else {
+    await sbFetch(`clients?id=eq.${obj.id}`, 'PATCH', row);
+  }
+  await loadClients();
+}
 
 // ════════════════════════════════════════════════════════
 // Supabase API
@@ -740,23 +751,27 @@ function editClient(id){
   renderCPRow(selColor);
 }
 
-function saveClient(){
-  const name=document.getElementById('cf-name').value.trim();
-  if(!name){alert('会社名は必須です');return;}
-  const obj={name,short:document.getElementById('cf-short').value.trim(),contact:document.getElementById('cf-contact').value.trim(),tel:document.getElementById('cf-tel').value.trim(),color:selColor};
-  if(editingCid){const idx=clients.findIndex(c=>c.id===editingCid);if(idx!==-1)clients[idx]={...clients[idx],...obj};}
-  else clients.push({id:'cl'+Date.now(),...obj});
-  saveClients(); populateClientSelects(); updateBannerSub(); renderClientList(); resetCF(); render();
-  toast('✓ 保存しました');
+async function saveClient(){
+  const name=document.getElementById("cf-name").value.trim();
+  if(!name){alert("会社名は必須です");return;}
+  const obj={id:editingCid||("cl"+Date.now()),name,short:document.getElementById("cf-short").value.trim(),color:selColor,memo:""};
+  const isNew=!editingCid;
+  try{
+    await saveClients_sb(obj,isNew);
+    populateClientSelects();updateBannerSub();renderClientList();resetCF();render();
+    toast("✓ 保存しました");
+  }catch(e){console.error(e);toast("⚠ 保存に失敗しました");}
 }
 
-function deleteClient(id){
+async function deleteClient(id){
   const c=getClient(id); if(!c) return;
   const cnt=data.filter(d=>d.clientId===id).length;
   if(!confirm(cnt>0?`「${c.name}」を削除すると${cnt}件の工事の設定が解除されます。削除しますか？`:`「${c.name}」を削除しますか？`)) return;
-  clients=clients.filter(c=>c.id!==id);
-  data.forEach(d=>{if(d.clientId===id)d.clientId='';});
-  saveClients(); populateClientSelects(); updateBannerSub(); renderClientList(); render();
+  try{
+    await sbFetch(`clients?id=eq.${id}`, 'DELETE');
+    await loadClients();
+    populateClientSelects(); updateBannerSub(); renderClientList(); render();
+  }catch(e){ console.error(e); toast('⚠ 削除に失敗しました'); }
 }
 
 function populateClientSelects(){
@@ -869,6 +884,7 @@ function toast(msg){const t=document.createElement('div');t.className='toast';t.
 // ── 初期化 ──
 populateClientSelects();
 updateBannerSub();
+loadClients();
 loadData();
 
 // 60秒ごとに自動再読み込み（他の端末の変更を反映）
